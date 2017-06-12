@@ -1,29 +1,22 @@
-//tabs=4
 // --------------------------------------------------------------------------------
-// TODO fill in this information for your driver, then remove this line!
 //
-// ASCOM Dome driver for Arduino
+// ASCOM Dome driver based around Arduino+Photon
 //
-// Description:	Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam 
-//				nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam 
-//				erat, sed diam voluptua. At vero eos et accusam et justo duo 
-//				dolores et ea rebum. Stet clita kasd gubergren, no sea takimata 
-//				sanctus est Lorem ipsum dolor sit amet.
+// Description: ASCOM Dome driver based around Arduino Leonardo and Particle Photon
+// Leonardo is used as shutter controller and for Azimuth measurement
+// Photon is used to control dome rotation and support cloud functions
 //
-// Implements:	ASCOM Dome interface version: <To be completed by driver developer>
-// Author:		(XXX) Your N. Here <your@email.here>
+// Implements:	ASCOM Dome interface version: 1.0.0
+// Author:		Manoj Koushik manoj.koushik@gmail.com
 //
-// Edit Log:
+// Edit Log: Initial version
 //
 // Date			Who	Vers	Description
 // -----------	---	-----	-------------------------------------------------------
-// dd-mmm-yyyy	XXX	6.0.0	Initial edit, created from ASCOM driver template
+// 30-04-2017	MK	1.0.0	Initial version, created from ASCOM driver template
 // --------------------------------------------------------------------------------
 //
 
-
-// This is used to define code in the template that is specific to one class implementation
-// unused code canbe deleted and this definition removed.
 #define Dome
 
 using System;
@@ -39,6 +32,9 @@ using ASCOM.Utilities;
 using ASCOM.DeviceInterface;
 using System.Globalization;
 using System.Collections;
+using System.Threading;
+using System.IO;
+using System.IO.Ports;
 
 namespace ASCOM.Arduino
 {
@@ -49,27 +45,14 @@ namespace ASCOM.Arduino
     // The ClassInterface/None addribute prevents an empty interface called
     // _Arduino from being created and used as the [default] interface
     //
-    // TODO Replace the not implemented exceptions with code to implement the function or
-    // throw the appropriate ASCOM exception.
-    //
 
-    /// <summary>
-    /// ASCOM Dome Driver for Arduino.
-    /// </summary>
+    /// ASCOM Dome Driver for Arduino+Photon.
     [Guid("bbe256ee-31a8-4556-8c4e-f38e6a010615")]
     [ClassInterface(ClassInterfaceType.None)]
     public class Dome : IDomeV2
     {
-        /// <summary>
-        /// ASCOM DeviceID (COM ProgID) for this driver.
-        /// The DeviceID is used by ASCOM applications to load the driver at runtime.
-        /// </summary>
         internal static string driverID = "ASCOM.Arduino.Dome";
-        // TODO Change the descriptive string for your driver then remove this line
-        /// <summary>
-        /// Driver description that displays in the ASCOM Chooser.
-        /// </summary>
-        private static string driverDescription = "ASCOM Dome Driver for Arduino.";
+        private static string driverDescription = "Arduino+Photon Dome Driver for Explora-Dome";
 
         internal static string comPortProfileName = "COM Port"; // Constants used for Profile persistence
         internal static string comPortDefault = "COM1";
@@ -78,33 +61,27 @@ namespace ASCOM.Arduino
 
         internal static string comPort; // Variables to hold the currrent device configuration
 
-        /// <summary>
-        /// Private variable to hold the connected state
-        /// </summary>
         private bool connectedState;
 
-        /// <summary>
-        /// Private variable to hold an ASCOM Utilities object
-        /// </summary>
         private Util utilities;
 
-        /// <summary>
-        /// Private variable to hold an ASCOM AstroUtilities object to provide the Range method
-        /// </summary>
         private AstroUtils astroUtilities;
 
-        /// <summary>
-        /// Variable to hold the trace logger object (creates a diagnostic log file with information that you specify)
-        /// </summary>
         internal static TraceLogger tl;
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="Arduino"/> class.
-        /// Must be public for COM registration.
-        /// </summary>
+        private double azimuth;
+        private bool rAzimuth = false;
+        ShutterState shutter;
+        private bool rShutter = false;
+        private bool parked = true;
+        private bool rParked = false;
+        private bool photonThreadRunning = false;
+        private Thread photonThread;
+        private int updateFrequency = 1000;
+        private SerialPort photon;
         public Dome()
         {
-            tl = new TraceLogger("", "Arduino");
+            tl = new TraceLogger("", "ArduinoDome");
             ReadProfile(); // Read device configuration from the ASCOM Profile store
 
             tl.LogMessage("Dome", "Starting initialisation");
@@ -118,18 +95,9 @@ namespace ASCOM.Arduino
         }
 
 
-        //
-        // PUBLIC COM INTERFACE IDomeV2 IMPLEMENTATION
-        //
 
         #region Common properties and methods.
 
-        /// <summary>
-        /// Displays the Setup Dialog form.
-        /// If the user clicks the OK button to dismiss the form, then
-        /// the new settings are saved, otherwise the old values are reloaded.
-        /// THIS IS THE ONLY PLACE WHERE SHOWING USER INTERFACE IS ALLOWED!
-        /// </summary>
         public void SetupDialog()
         {
             // consider only showing the setup dialog if not connected
@@ -147,49 +115,173 @@ namespace ASCOM.Arduino
             }
         }
 
+        private void domeResponse()
+        {
+            photonThreadRunning = true;
+            Stopwatch timer = new Stopwatch();
+            timer.Start();
+
+            while (this.Connected)
+            {
+                string response = photon.ReadLine();
+                response = response.TrimEnd('\r', '\n');
+                if (!string.IsNullOrEmpty(response))
+                {
+                    if (response.StartsWith("DCR:"))
+                    {
+
+                        //string[] parts = response.Split(':');
+
+                        //tl.LogMessage("Response Thread", parts[0] + " " + parts[1] + " " + parts[2]);
+                        tl.LogMessage("Response Thread", response);
+
+                        //    if (parts[1].Equals("AZ"))
+                        //    {
+                        //        azimuth = float.Parse(parts[2]);
+                        //        rAzimuth = false;
+                        //    }
+                        //    else if (parts[1].Equals("S"))
+                        //    {
+                        //        shutter = (ShutterState)int.Parse(parts[2]);
+                        //        rShutter = false;
+                        //    }
+                        //    else if (parts[1].Equals("GETP"))
+                        //    {
+                        //        parked = bool.Parse(parts[2]);
+                        //        rParked = false;
+                        //    }
+                        //}
+                    }
+                    Thread.Sleep(100);
+                }
+
+                photonThreadRunning = false;
+            }
+        }
+
         public ArrayList SupportedActions
         {
             get
             {
-                tl.LogMessage("SupportedActions Get", "Returning empty arraylist");
-                return new ArrayList();
+                tl.LogMessage("SupportedActions Get", "Returning list...");
+                ArrayList supportedActions = new ArrayList();
+
+                supportedActions.Add("OS");
+                supportedActions.Add("CS");
+                supportedActions.Add("VS");
+                supportedActions.Add("SS");
+                supportedActions.Add("SLEWAZ");
+                supportedActions.Add("SYNCAZ");
+                supportedActions.Add("STOPSLEW");
+                supportedActions.Add("SETP");
+                supportedActions.Add("P");
+                supportedActions.Add("AZ");
+                supportedActions.Add("LS");
+                supportedActions.Add("US");
+                supportedActions.Add("T");
+
+                return supportedActions;
             }
         }
 
         public string Action(string actionName, string actionParameters)
         {
-            LogMessage("", "Action {0}, parameters {1} not implemented", actionName, actionParameters);
-            throw new ASCOM.ActionNotImplementedException("Action " + actionName + " is not implemented by this driver");
+            LogMessage("Action", "ActionName {0}, ActionParameters {1} called", actionName, actionParameters);
+
+            string deviceType = actionName.Substring(0, actionName.IndexOf(':'));
+            string action = actionName.Substring(actionName.IndexOf(':') + 1);
+
+            if (!deviceType.Equals("DC", StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            if (action.Equals("OS", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("OS", false);
+            }
+            else if (action.Equals("CS", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("CS", false);
+            }
+            else if (action.Equals("SS", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("SS", false);
+            }
+            else if (action.Equals("VS", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("VS", false);
+            }
+            else if (action.Equals("SLEWAZ", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("SLEWAZ:" + actionParameters, false);
+            }
+            else if (action.Equals("SYNCAZ", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("SYNCAZ:" + actionParameters, false);
+            }
+            else if (action.Equals("STOPAZ", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("STOPAZ", false);
+            }
+            else if (action.Equals("SETP", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("SETP:" + actionParameters, false);
+            }
+            else if (action.Equals("P", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("P", false);
+            }
+            else if (action.Equals("AZ", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("AZ", false);
+            }
+            else if (action.Equals("LS", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("LS", false);
+            }
+            else if (action.Equals("US", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("US", false);
+            }
+            else if (action.Equals("T", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandString("T", false);
+            }
+            else
+            {
+                return "";
+            }
         }
 
         public void CommandBlind(string command, bool raw)
         {
-            CheckConnected("CommandBlind");
-            // Call CommandString and return as soon as it finishes
-            this.CommandString(command, raw);
-            // or
             throw new ASCOM.MethodNotImplementedException("CommandBlind");
-            // DO NOT have both these sections!  One or the other
         }
 
         public bool CommandBool(string command, bool raw)
         {
-            CheckConnected("CommandBool");
-            string ret = CommandString(command, raw);
-            // TODO decode the return string and return true or false
-            // or
             throw new ASCOM.MethodNotImplementedException("CommandBool");
-            // DO NOT have both these sections!  One or the other
         }
 
         public string CommandString(string command, bool raw)
         {
             CheckConnected("CommandString");
-            // it's a good idea to put all the low level communication with the device here,
-            // then all communication calls this function
-            // you need something to ensure that only one command is in progress at a time
+            photon.WriteLine("DC:" + command);
 
-            throw new ASCOM.MethodNotImplementedException("CommandString");
+            Stopwatch timer = new Stopwatch();
+            timer.Start();
+
+            while (timer.ElapsedMilliseconds <= updateFrequency)
+            {
+                string response = photon.ReadLine();
+                response = response.TrimEnd('\r', '\n');
+                if (!string.IsNullOrEmpty(response) && response.StartsWith("DCR:"))
+                    return response.Substring(response.IndexOf(':') + 1);
+                Thread.Sleep(100);
+            }
+
+            return "";
         }
 
         public void Dispose()
@@ -208,7 +300,7 @@ namespace ASCOM.Arduino
         {
             get
             {
-                LogMessage("Connected", "Get {0}", IsConnected);
+//                LogMessage("Connected", "Get {0}", IsConnected);
                 return IsConnected;
             }
             set
@@ -219,22 +311,50 @@ namespace ASCOM.Arduino
 
                 if (value)
                 {
-                    connectedState = true;
                     LogMessage("Connected Set", "Connecting to port {0}", comPort);
-                    // TODO connect to the device
+                    try
+                    {
+                        // This thread will run as long as we are connected
+                        photon = new SerialPort(comPort, 57600);
+                        photon.Open();
+
+                        //photonThread = new Thread(this.domeResponse);
+                        //photonThread.Start();
+
+                    }
+                    catch (Exception e)
+                    {
+                        LogMessage("Could not connect to port {0}", comPort);
+                        throw new ASCOM.NotConnectedException("Could not connect to port ", e);
+                    }
+                    connectedState = true;
                 }
                 else
                 {
+                    LogMessage("Connected Unset", "Disconnecting to port {0}", comPort);
+
+                    // Before closing connection to Arduino, ask update thread to stop
                     connectedState = false;
-                    LogMessage("Connected Set", "Disconnecting from port {0}", comPort);
-                    // TODO disconnect from the device
+
+                    //while (photonThreadRunning)
+                    //{
+                    //    Thread.Sleep(1000);
+                    //}
+
+                    //photonThread = null;
+
+                    if (photon != null)
+                    {
+                        photon.Close();
+                        photon.Dispose();
+                        photon = null;
+                    }
                 }
             }
         }
 
         public string Description
         {
-            // TODO customise this device description
             get
             {
                 tl.LogMessage("Description Get", driverDescription);
@@ -247,8 +367,7 @@ namespace ASCOM.Arduino
             get
             {
                 Version version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                // TODO customise this driver description
-                string driverInfo = "Information about the driver itself. Version: " + String.Format(CultureInfo.InvariantCulture, "{0}.{1}", version.Major, version.Minor);
+                string driverInfo = "A Photon+Arduino based dome controller for Explora-Dome. Version: " + String.Format(CultureInfo.InvariantCulture, "{0}.{1}", version.Major, version.Minor);
                 tl.LogMessage("DriverInfo Get", driverInfo);
                 return driverInfo;
             }
@@ -279,7 +398,7 @@ namespace ASCOM.Arduino
         {
             get
             {
-                string name = "Short driver name - please customise";
+                string name = "Arduino+Photon Dome Controller";
                 tl.LogMessage("Name Get", name);
                 return name;
             }
@@ -289,11 +408,9 @@ namespace ASCOM.Arduino
 
         #region IDome Implementation
 
-        private bool domeShutterState = false; // Variable to hold the open/closed status of the shutter, true = Open
-
         public void AbortSlew()
         {
-            // This is a mandatory parameter but we have no action to take in this simple driver
+            CommandString("STOPSLEW", false);
             tl.LogMessage("AbortSlew", "Completed");
         }
 
@@ -310,8 +427,8 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("AtHome Get", "Not implemented");
-                throw new ASCOM.PropertyNotImplementedException("AtHome", false);
+                //tl.LogMessage("AtHome Get", "No Home Position. Returning false...");
+                return false;
             }
         }
 
@@ -319,8 +436,14 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("AtPark Get", "Not implemented");
-                throw new ASCOM.PropertyNotImplementedException("AtPark", false);
+                rParked = true;
+                string resp = CommandString("GETP", false);
+                if (resp.StartsWith("GETP"))
+                {
+                    parked = bool.Parse(resp.Substring(resp.IndexOf(':') + 1));
+                    tl.LogMessage("AtPark Get", parked.ToString());
+                }
+                return parked;
             }
         }
 
@@ -328,8 +451,14 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("Azimuth Get", "Not implemented");
-                throw new ASCOM.PropertyNotImplementedException("Azimuth", false);
+                rAzimuth = true;
+                string resp = CommandString("AZ", false);
+                if (resp.StartsWith("AZ"))
+                {
+                    azimuth = float.Parse(resp.Substring(resp.IndexOf(':') + 1));
+                    tl.LogMessage("Azimuth Get", azimuth.ToString());
+                }
+                return azimuth;
             }
         }
 
@@ -346,8 +475,8 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("CanPark Get", false.ToString());
-                return false;
+                tl.LogMessage("CanPark Get", true.ToString());
+                return true;
             }
         }
 
@@ -364,8 +493,8 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("CanSetAzimuth Get", false.ToString());
-                return false;
+                tl.LogMessage("CanSetAzimuth Get", true.ToString());
+                return true;
             }
         }
 
@@ -373,8 +502,8 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("CanSetPark Get", false.ToString());
-                return false;
+                tl.LogMessage("CanSetPark Get", true.ToString());
+                return true;
             }
         }
 
@@ -400,15 +529,15 @@ namespace ASCOM.Arduino
         {
             get
             {
-                tl.LogMessage("CanSyncAzimuth Get", false.ToString());
-                return false;
+                tl.LogMessage("CanSyncAzimuth Get", true.ToString());
+                return true;
             }
         }
 
         public void CloseShutter()
         {
-            tl.LogMessage("CloseShutter", "Shutter has been closed");
-            domeShutterState = false;
+            CommandString("CS", false);
+            tl.LogMessage("CloseShutter", "Shutter is being closed");
         }
 
         public void FindHome()
@@ -419,37 +548,34 @@ namespace ASCOM.Arduino
 
         public void OpenShutter()
         {
-            tl.LogMessage("OpenShutter", "Shutter has been opened");
-            domeShutterState = true;
+            CommandString("OS", false);
+            tl.LogMessage("OpenShutter", "Shutter is being opened");
         }
 
         public void Park()
         {
-            tl.LogMessage("Park", "Not implemented");
-            throw new ASCOM.MethodNotImplementedException("Park");
+            CommandString("P", false);
+            tl.LogMessage("Park", "Parking...");
         }
 
         public void SetPark()
         {
-            tl.LogMessage("SetPark", "Not implemented");
-            throw new ASCOM.MethodNotImplementedException("SetPark");
+            CommandString("SETP:" + azimuth.ToString("F2"), false);
+            tl.LogMessage("SetPark", "Setting park position to azimuth " + azimuth.ToString("F2"));
         }
 
         public ShutterState ShutterStatus
         {
             get
             {
-                tl.LogMessage("ShutterStatus Get", false.ToString());
-                if (domeShutterState)
+                rShutter = true;
+                string resp = CommandString("S", false);
+                if (resp.StartsWith("S"))
                 {
-                    tl.LogMessage("ShutterStatus", ShutterState.shutterOpen.ToString());
-                    return ShutterState.shutterOpen;
+                    shutter = (ShutterState) int.Parse(resp.Substring(resp.IndexOf(':') + 1));
+                    tl.LogMessage("ShutterStatus", shutter.ToString());
                 }
-                else
-                {
-                    tl.LogMessage("ShutterStatus", ShutterState.shutterClosed.ToString());
-                    return ShutterState.shutterClosed;
-                }
+                return shutter;
             }
         }
 
@@ -475,41 +601,33 @@ namespace ASCOM.Arduino
 
         public void SlewToAzimuth(double Azimuth)
         {
-            tl.LogMessage("SlewToAzimuth", "Not implemented");
-            throw new ASCOM.MethodNotImplementedException("SlewToAzimuth");
+            CommandString("SLEWAZ:" + Azimuth.ToString("F2"), false);
+            tl.LogMessage("SlewToAzimuth", "Slewing from " + azimuth.ToString() + " to " + Azimuth.ToString("F2"));
         }
 
         public bool Slewing
         {
             get
             {
-                tl.LogMessage("Slewing Get", false.ToString());
-                return false;
+                bool slewing = bool.Parse(CommandString("GETSLEW", false));
+                tl.LogMessage("Slewing Get", slewing.ToString());
+
+                return slewing;
             }
         }
 
         public void SyncToAzimuth(double Azimuth)
         {
-            tl.LogMessage("SyncToAzimuth", "Not implemented");
-            throw new ASCOM.MethodNotImplementedException("SyncToAzimuth");
+            CommandString("SAZ:" + Azimuth.ToString("F2"), false);
+            tl.LogMessage("SyncToAzimuth", "syncing to azimuth to " + Azimuth.ToString("F2"));
         }
 
         #endregion
 
         #region Private properties and methods
-        // here are some useful properties and methods that can be used as required
-        // to help with driver development
 
         #region ASCOM Registration
 
-        // Register or unregister driver for ASCOM. This is harmless if already
-        // registered or unregistered. 
-        //
-        /// <summary>
-        /// Register or unregister the driver with the ASCOM Platform.
-        /// This is harmless if the driver is already registered/unregistered.
-        /// </summary>
-        /// <param name="bRegister">If <c>true</c>, registers the driver, otherwise unregisters it.</param>
         private static void RegUnregASCOM(bool bRegister)
         {
             using (var P = new ASCOM.Utilities.Profile())
@@ -526,46 +644,12 @@ namespace ASCOM.Arduino
             }
         }
 
-        /// <summary>
-        /// This function registers the driver with the ASCOM Chooser and
-        /// is called automatically whenever this class is registered for COM Interop.
-        /// </summary>
-        /// <param name="t">Type of the class being registered, not used.</param>
-        /// <remarks>
-        /// This method typically runs in two distinct situations:
-        /// <list type="numbered">
-        /// <item>
-        /// In Visual Studio, when the project is successfully built.
-        /// For this to work correctly, the option <c>Register for COM Interop</c>
-        /// must be enabled in the project settings.
-        /// </item>
-        /// <item>During setup, when the installer registers the assembly for COM Interop.</item>
-        /// </list>
-        /// This technique should mean that it is never necessary to manually register a driver with ASCOM.
-        /// </remarks>
         [ComRegisterFunction]
         public static void RegisterASCOM(Type t)
         {
             RegUnregASCOM(true);
         }
 
-        /// <summary>
-        /// This function unregisters the driver from the ASCOM Chooser and
-        /// is called automatically whenever this class is unregistered from COM Interop.
-        /// </summary>
-        /// <param name="t">Type of the class being registered, not used.</param>
-        /// <remarks>
-        /// This method typically runs in two distinct situations:
-        /// <list type="numbered">
-        /// <item>
-        /// In Visual Studio, when the project is cleaned or prior to rebuilding.
-        /// For this to work correctly, the option <c>Register for COM Interop</c>
-        /// must be enabled in the project settings.
-        /// </item>
-        /// <item>During uninstall, when the installer unregisters the assembly from COM Interop.</item>
-        /// </list>
-        /// This technique should mean that it is never necessary to manually unregister a driver from ASCOM.
-        /// </remarks>
         [ComUnregisterFunction]
         public static void UnregisterASCOM(Type t)
         {
@@ -574,9 +658,6 @@ namespace ASCOM.Arduino
 
         #endregion
 
-        /// <summary>
-        /// Returns true if there is a valid connection to the driver hardware
-        /// </summary>
         private bool IsConnected
         {
             get
@@ -586,10 +667,6 @@ namespace ASCOM.Arduino
             }
         }
 
-        /// <summary>
-        /// Use this function to throw an exception if we aren't connected to the hardware
-        /// </summary>
-        /// <param name="message"></param>
         private void CheckConnected(string message)
         {
             if (!IsConnected)
@@ -598,9 +675,6 @@ namespace ASCOM.Arduino
             }
         }
 
-        /// <summary>
-        /// Read the device configuration from the ASCOM Profile store
-        /// </summary>
         internal void ReadProfile()
         {
             using (Profile driverProfile = new Profile())
@@ -611,9 +685,6 @@ namespace ASCOM.Arduino
             }
         }
 
-        /// <summary>
-        /// Write the device configuration to the  ASCOM  Profile store
-        /// </summary>
         internal void WriteProfile()
         {
             using (Profile driverProfile = new Profile())
@@ -624,12 +695,6 @@ namespace ASCOM.Arduino
             }
         }
 
-        /// <summary>
-        /// Log helper function that takes formatted strings and arguments
-        /// </summary>
-        /// <param name="identifier"></param>
-        /// <param name="message"></param>
-        /// <param name="args"></param>
         internal static void LogMessage(string identifier, string message, params object[] args)
         {
             var msg = string.Format(message, args);
