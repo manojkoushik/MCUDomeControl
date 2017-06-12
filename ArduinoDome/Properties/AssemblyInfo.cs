@@ -8,10 +8,10 @@ using System.Runtime.InteropServices;
 //
 // TODO - Add your authorship information here
 [assembly: AssemblyTitle("ASCOM.Arduino.Dome")]
-[assembly: AssemblyDescription("ASCOM Dome driver for Arduino")]
+[assembly: AssemblyDescription("ASCOM Dome driver for Photon+Arduino")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("The ASCOM Initiative")]
-[assembly: AssemblyProduct("ASCOM Dome driver for Arduino")]
+[assembly: AssemblyProduct("ASCOM Dome driver for Photon+Arduino")]
 [assembly: AssemblyCopyright("Copyright © 2017 The ASCOM Initiative")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]

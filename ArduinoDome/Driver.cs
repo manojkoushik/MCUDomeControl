@@ -70,14 +70,10 @@ namespace ASCOM.Arduino
         internal static TraceLogger tl;
 
         private double azimuth;
-        private bool rAzimuth = false;
         ShutterState shutter;
-        private bool rShutter = false;
         private bool parked = true;
-        private bool rParked = false;
-        private bool photonThreadRunning = false;
-        private Thread photonThread;
-        private int updateFrequency = 1000;
+        // wait for up to 5 seconds for a response
+        private int updateFrequency = 5000;
         private SerialPort photon;
         public Dome()
         {
@@ -115,49 +111,6 @@ namespace ASCOM.Arduino
             }
         }
 
-        private void domeResponse()
-        {
-            photonThreadRunning = true;
-            Stopwatch timer = new Stopwatch();
-            timer.Start();
-
-            while (this.Connected)
-            {
-                string response = photon.ReadLine();
-                response = response.TrimEnd('\r', '\n');
-                if (!string.IsNullOrEmpty(response))
-                {
-                    if (response.StartsWith("DCR:"))
-                    {
-
-                        //string[] parts = response.Split(':');
-
-                        //tl.LogMessage("Response Thread", parts[0] + " " + parts[1] + " " + parts[2]);
-                        tl.LogMessage("Response Thread", response);
-
-                        //    if (parts[1].Equals("AZ"))
-                        //    {
-                        //        azimuth = float.Parse(parts[2]);
-                        //        rAzimuth = false;
-                        //    }
-                        //    else if (parts[1].Equals("S"))
-                        //    {
-                        //        shutter = (ShutterState)int.Parse(parts[2]);
-                        //        rShutter = false;
-                        //    }
-                        //    else if (parts[1].Equals("GETP"))
-                        //    {
-                        //        parked = bool.Parse(parts[2]);
-                        //        rParked = false;
-                        //    }
-                        //}
-                    }
-                    Thread.Sleep(100);
-                }
-
-                photonThreadRunning = false;
-            }
-        }
 
         public ArrayList SupportedActions
         {
@@ -274,10 +227,15 @@ namespace ASCOM.Arduino
 
             while (timer.ElapsedMilliseconds <= updateFrequency)
             {
-                string response = photon.ReadLine();
-                response = response.TrimEnd('\r', '\n');
-                if (!string.IsNullOrEmpty(response) && response.StartsWith("DCR:"))
-                    return response.Substring(response.IndexOf(':') + 1);
+                try
+                {
+                    string response = photon.ReadLine();
+                    if (!string.IsNullOrEmpty(response) && response.StartsWith("DCR:"))
+                        return response.Substring(response.IndexOf(':') + 1);
+                }
+
+                catch (Exception) { }
+
                 Thread.Sleep(100);
             }
 
@@ -300,7 +258,6 @@ namespace ASCOM.Arduino
         {
             get
             {
-//                LogMessage("Connected", "Get {0}", IsConnected);
                 return IsConnected;
             }
             set
@@ -314,34 +271,33 @@ namespace ASCOM.Arduino
                     LogMessage("Connected Set", "Connecting to port {0}", comPort);
                     try
                     {
-                        // This thread will run as long as we are connected
                         photon = new SerialPort(comPort, 57600);
                         photon.Open();
-
-                        //photonThread = new Thread(this.domeResponse);
-                        //photonThread.Start();
-
+                        // Now that we are connected make sure we can talk to the dome controller
+                        photon.ReadTimeout = 1000;
+                        connectedState = true;
+                        string resp = CommandString("AZ", false);
+                        if (string.IsNullOrEmpty(resp))
+                        {
+                            LogMessage("Connected to {0} but no response", comPort);
+                            connectedState = false;
+                            photon.Close();
+                            photon.Dispose();
+                            photon = null;
+                            throw new NotConnectedException("Connected but no response");
+                        }
                     }
                     catch (Exception e)
                     {
                         LogMessage("Could not connect to port {0}", comPort);
-                        throw new ASCOM.NotConnectedException("Could not connect to port ", e);
+                        throw new ASCOM.NotConnectedException(e.Message + "\nCould not connect to port ", e);
                     }
-                    connectedState = true;
                 }
                 else
                 {
                     LogMessage("Connected Unset", "Disconnecting to port {0}", comPort);
 
-                    // Before closing connection to Arduino, ask update thread to stop
                     connectedState = false;
-
-                    //while (photonThreadRunning)
-                    //{
-                    //    Thread.Sleep(1000);
-                    //}
-
-                    //photonThread = null;
 
                     if (photon != null)
                     {
@@ -427,7 +383,7 @@ namespace ASCOM.Arduino
         {
             get
             {
-                //tl.LogMessage("AtHome Get", "No Home Position. Returning false...");
+                tl.LogMessage("AtHome Get", "No Home Position. Returning false...");
                 return false;
             }
         }
@@ -436,7 +392,6 @@ namespace ASCOM.Arduino
         {
             get
             {
-                rParked = true;
                 string resp = CommandString("GETP", false);
                 if (resp.StartsWith("GETP"))
                 {
@@ -451,7 +406,6 @@ namespace ASCOM.Arduino
         {
             get
             {
-                rAzimuth = true;
                 string resp = CommandString("AZ", false);
                 if (resp.StartsWith("AZ"))
                 {
@@ -568,7 +522,6 @@ namespace ASCOM.Arduino
         {
             get
             {
-                rShutter = true;
                 string resp = CommandString("S", false);
                 if (resp.StartsWith("S"))
                 {
